@@ -9,11 +9,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
@@ -21,29 +19,633 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Find and fix gradlew
+      - name: Create full Android project
         run: |
-          find . -name "gradlew" -type f
-          GRADLEW=$(find . -name "gradlew" -type f | head -1)
-          echo "Found gradlew at: $GRADLEW"
-          chmod +x "$GRADLEW"
-          PROJ_DIR=$(dirname "$GRADLEW")
-          echo "PROJECT_DIR=$PROJ_DIR" >> $GITHUB_ENV
+          mkdir -p app/src/main/java/com/overlaynote/app
+          mkdir -p app/src/main/res/layout
+          mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/res/drawable
+          mkdir -p app/src/main/res/mipmap-hdpi
+          mkdir -p gradle/wrapper
 
-      - name: Build Debug APK
+          # ── settings.gradle ──────────────────────────
+          cat > settings.gradle << 'SETTINGS'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "OverlayNote"
+          include ':app'
+          SETTINGS
+
+          # ── Root build.gradle ─────────────────────────
+          cat > build.gradle << 'ROOTGRADLE'
+          plugins {
+              id 'com.android.application' version '8.2.2' apply false
+              id 'org.jetbrains.kotlin.android' version '1.9.22' apply false
+          }
+          ROOTGRADLE
+
+          # ── App build.gradle ──────────────────────────
+          cat > app/build.gradle << 'APPGRADLE'
+          plugins {
+              id 'com.android.application'
+              id 'org.jetbrains.kotlin.android'
+          }
+          android {
+              namespace 'com.overlaynote.app'
+              compileSdk 34
+              defaultConfig {
+                  applicationId "com.overlaynote.app"
+                  minSdk 26
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
+              }
+              buildTypes {
+                  debug { debuggable true }
+              }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+              kotlinOptions { jvmTarget = '17' }
+          }
+          dependencies {
+              implementation 'androidx.core:core-ktx:1.12.0'
+              implementation 'androidx.appcompat:appcompat:1.6.1'
+              implementation 'com.google.android.material:material:1.11.0'
+              implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+              implementation 'androidx.recyclerview:recyclerview:1.3.2'
+              implementation 'androidx.cardview:cardview:1.0.0'
+              implementation 'androidx.lifecycle:lifecycle-service:2.7.0'
+          }
+          APPGRADLE
+
+          # ── gradle-wrapper.properties ─────────────────
+          cat > gradle/wrapper/gradle-wrapper.properties << 'GWPROPS'
+          distributionBase=GRADLE_USER_HOME
+          distributionPath=wrapper/dists
+          distributionUrl=https\://services.gradle.org/distributions/gradle-8.4-bin.zip
+          zipStoreBase=GRADLE_USER_HOME
+          zipStorePath=wrapper/dists
+          GWPROPS
+
+          # ── Download gradle wrapper jar ───────────────
+          curl -sL "https://github.com/gradle/gradle/raw/v8.4.0/gradle/wrapper/gradle-wrapper.jar" \
+            -o gradle/wrapper/gradle-wrapper.jar || \
+          wget -q "https://raw.githubusercontent.com/gradle/gradle/v8.4.0/gradle/wrapper/gradle-wrapper.jar" \
+            -O gradle/wrapper/gradle-wrapper.jar || true
+
+          # ── gradlew ───────────────────────────────────
+          cat > gradlew << 'GRADLEW'
+          #!/bin/sh
+          APP_HOME="$(cd "$(dirname "$0")" && pwd)"
+          exec java -jar "$APP_HOME/gradle/wrapper/gradle-wrapper.jar" "$@"
+          GRADLEW
+          chmod +x gradlew
+
+          # ── AndroidManifest.xml ───────────────────────
+          cat > app/src/main/AndroidManifest.xml << 'MANIFEST'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
+              <application
+                  android:allowBackup="true"
+                  android:label="OverlayNote"
+                  android:theme="@style/Theme.OverlayNote"
+                  android:icon="@mipmap/ic_launcher">
+                  <activity android:name=".MainActivity" android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+                  <activity android:name=".SessionActivity" android:exported="false"/>
+                  <service android:name=".OverlayService" android:exported="false"
+                      android:foregroundServiceType="specialUse">
+                      <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                          android:value="overlayNote"/>
+                  </service>
+              </application>
+          </manifest>
+          MANIFEST
+
+          # ── colors.xml ────────────────────────────────
+          cat > app/src/main/res/values/colors.xml << 'COLORS'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <color name="bg_dark">#0D0F14</color>
+              <color name="surface">#151820</color>
+              <color name="surface_high">#1E2230</color>
+              <color name="border">#2A2F40</color>
+              <color name="blue">#4A8FE7</color>
+              <color name="teal">#2ECFB0</color>
+              <color name="amber">#F5A623</color>
+              <color name="red">#E05C5C</color>
+              <color name="text_primary">#EEF2FF</color>
+              <color name="text_secondary">#8892AA</color>
+              <color name="text_dim">#556070</color>
+              <color name="white">#FFFFFF</color>
+          </resources>
+          COLORS
+
+          # ── strings.xml ───────────────────────────────
+          cat > app/src/main/res/values/strings.xml << 'STRINGS'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <string name="app_name">OverlayNote</string>
+          </resources>
+          STRINGS
+
+          # ── themes.xml ────────────────────────────────
+          cat > app/src/main/res/values/themes.xml << 'THEMES'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <style name="Theme.OverlayNote" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+                  <item name="colorPrimary">@color/blue</item>
+                  <item name="colorPrimaryVariant">@color/blue</item>
+                  <item name="colorOnPrimary">@color/white</item>
+                  <item name="colorSecondary">@color/teal</item>
+                  <item name="android:windowBackground">@color/bg_dark</item>
+                  <item name="android:statusBarColor">@color/surface</item>
+              </style>
+              <style name="ToolBtn">
+                  <item name="android:layout_width">38dp</item>
+                  <item name="android:layout_height">38dp</item>
+                  <item name="android:layout_margin">2dp</item>
+                  <item name="android:background">?attr/selectableItemBackgroundBorderless</item>
+                  <item name="android:padding">6dp</item>
+              </style>
+          </resources>
+          THEMES
+
+          # ── ic_launcher.xml ───────────────────────────
+          cat > app/src/main/res/mipmap-hdpi/ic_launcher.xml << 'ICON'
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@color/blue"/>
+              <foreground android:drawable="@color/teal"/>
+          </adaptive-icon>
+          ICON
+
+          # ── toolbar_bg.xml ────────────────────────────
+          cat > app/src/main/res/drawable/toolbar_bg.xml << 'DRAWBG'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android">
+              <solid android:color="#E6151820"/>
+              <corners android:radius="14dp"/>
+              <stroke android:width="1dp" android:color="#2A2F40"/>
+          </shape>
+          DRAWBG
+
+          cat > app/src/main/res/drawable/circle_white.xml << 'CW'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
+              <solid android:color="#FFFFFF"/>
+          </shape>
+          CW
+
+          cat > app/src/main/res/drawable/circle_gray.xml << 'CG'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
+              <solid android:color="#8892AA"/>
+          </shape>
+          CG
+
+          cat > app/src/main/res/drawable/edit_text_bg.xml << 'ETB'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android">
+              <solid android:color="#1E2230"/>
+              <corners android:radius="8dp"/>
+              <stroke android:width="1dp" android:color="#2A2F40"/>
+          </shape>
+          ETB
+
+          # ── activity_main.xml ─────────────────────────
+          cat > app/src/main/res/layout/activity_main.xml << 'LMAIN'
+          <?xml version="1.0" encoding="utf-8"?>
+          <androidx.coordinatorlayout.widget.CoordinatorLayout
+              xmlns:android="http://schemas.android.com/apk/res/android"
+              xmlns:app="http://schemas.android.com/apk/res-auto"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:background="@color/bg_dark">
+              <LinearLayout android:layout_width="match_parent" android:layout_height="56dp"
+                  android:background="@color/surface" android:elevation="4dp"
+                  android:gravity="center_vertical" android:paddingStart="16dp" android:paddingEnd="16dp">
+                  <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                      android:text="✏ OverlayNote" android:textColor="@color/text_primary"
+                      android:textSize="18sp" android:textStyle="bold"/>
+              </LinearLayout>
+              <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent"
+                  android:orientation="vertical" android:paddingTop="56dp">
+                  <LinearLayout android:id="@+id/emptyView" android:layout_width="match_parent"
+                      android:layout_height="match_parent" android:gravity="center"
+                      android:orientation="vertical" android:visibility="gone">
+                      <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                          android:text="📒" android:textSize="56sp"/>
+                      <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                          android:text="No sessions yet" android:textColor="@color/text_primary"
+                          android:textSize="18sp" android:layout_marginTop="12dp"/>
+                      <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                          android:text="Tap + to start" android:textColor="@color/text_secondary"
+                          android:textSize="14sp" android:layout_marginTop="6dp"/>
+                  </LinearLayout>
+                  <androidx.recyclerview.widget.RecyclerView android:id="@+id/recyclerSessions"
+                      android:layout_width="match_parent" android:layout_height="match_parent"
+                      android:padding="12dp" android:clipToPadding="false"/>
+              </LinearLayout>
+              <com.google.android.material.floatingactionbutton.FloatingActionButton
+                  android:id="@+id/fab" android:layout_width="wrap_content"
+                  android:layout_height="wrap_content" android:layout_gravity="bottom|end"
+                  android:layout_margin="20dp" android:contentDescription="New Session"
+                  app:srcCompat="@android:drawable/ic_input_add" app:backgroundTint="@color/blue"/>
+          </androidx.coordinatorlayout.widget.CoordinatorLayout>
+          LMAIN
+
+          # ── item_session.xml ──────────────────────────
+          cat > app/src/main/res/layout/item_session.xml << 'LITEM'
+          <?xml version="1.0" encoding="utf-8"?>
+          <androidx.cardview.widget.CardView xmlns:android="http://schemas.android.com/apk/res/android"
+              xmlns:app="http://schemas.android.com/apk/res-auto"
+              android:id="@+id/card" android:layout_width="match_parent"
+              android:layout_height="wrap_content" android:layout_marginBottom="10dp"
+              app:cardBackgroundColor="@color/surface" app:cardCornerRadius="12dp">
+              <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                  android:padding="16dp" android:orientation="horizontal" android:gravity="center_vertical">
+                  <TextView android:layout_width="48dp" android:layout_height="48dp"
+                      android:gravity="center" android:text="📝" android:textSize="24sp"
+                      android:background="@color/surface_high" android:layout_marginEnd="14dp"/>
+                  <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                      android:layout_weight="1" android:orientation="vertical">
+                      <TextView android:id="@+id/tvSubject" android:layout_width="match_parent"
+                          android:layout_height="wrap_content" android:textColor="@color/text_primary"
+                          android:textSize="15sp" android:textStyle="bold" android:maxLines="1"
+                          android:ellipsize="end"/>
+                      <TextView android:id="@+id/tvTopic" android:layout_width="match_parent"
+                          android:layout_height="wrap_content" android:textColor="@color/text_secondary"
+                          android:textSize="13sp" android:layout_marginTop="2dp" android:maxLines="1"
+                          android:ellipsize="end"/>
+                      <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                          android:orientation="horizontal" android:layout_marginTop="6dp">
+                          <TextView android:id="@+id/tvDate" android:layout_width="wrap_content"
+                              android:layout_height="wrap_content" android:textColor="@color/text_dim"
+                              android:textSize="12sp"/>
+                          <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                              android:text=" · " android:textColor="@color/text_dim" android:textSize="12sp"/>
+                          <TextView android:id="@+id/tvPages" android:layout_width="wrap_content"
+                              android:layout_height="wrap_content" android:textColor="@color/text_dim"
+                              android:textSize="12sp"/>
+                      </LinearLayout>
+                  </LinearLayout>
+                  <ImageButton android:id="@+id/btnDelete" android:layout_width="36dp"
+                      android:layout_height="36dp" android:src="@android:drawable/ic_menu_delete"
+                      android:background="?attr/selectableItemBackgroundBorderless"
+                      android:tint="@color/red" android:contentDescription="Delete"/>
+              </LinearLayout>
+          </androidx.cardview.widget.CardView>
+          LITEM
+
+          # ── dialog_new_session.xml ────────────────────
+          cat > app/src/main/res/layout/dialog_new_session.xml << 'LDIALOG'
+          <?xml version="1.0" encoding="utf-8"?>
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent" android:layout_height="wrap_content"
+              android:orientation="vertical" android:padding="20dp">
+              <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                  android:text="SUBJECT" android:textColor="@color/text_secondary" android:textSize="11sp"/>
+              <EditText android:id="@+id/etSubject" android:layout_width="match_parent"
+                  android:layout_height="wrap_content" android:hint="e.g. C Programming"
+                  android:inputType="textCapSentences" android:padding="12dp"
+                  android:background="@drawable/edit_text_bg"
+                  android:textColor="@color/text_primary" android:textColorHint="@color/text_dim"/>
+              <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                  android:text="TOPIC" android:textColor="@color/text_secondary"
+                  android:textSize="11sp" android:layout_marginTop="16dp"/>
+              <EditText android:id="@+id/etTopic" android:layout_width="match_parent"
+                  android:layout_height="wrap_content" android:hint="e.g. Recursion Trees"
+                  android:inputType="textCapSentences" android:padding="12dp"
+                  android:background="@drawable/edit_text_bg"
+                  android:textColor="@color/text_primary" android:textColorHint="@color/text_dim"/>
+          </LinearLayout>
+          LDIALOG
+
+          # ── activity_session.xml ──────────────────────
+          cat > app/src/main/res/layout/activity_session.xml << 'LSESSION'
+          <?xml version="1.0" encoding="utf-8"?>
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent" android:layout_height="match_parent"
+              android:orientation="vertical" android:background="@color/bg_dark"
+              android:padding="24dp" android:gravity="center">
+              <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                  android:text="📒" android:textSize="64sp" android:layout_marginBottom="20dp"/>
+              <TextView android:id="@+id/tvSubject" android:layout_width="wrap_content"
+                  android:layout_height="wrap_content" android:textColor="@color/text_primary"
+                  android:textSize="22sp" android:textStyle="bold" android:gravity="center"/>
+              <TextView android:id="@+id/tvTopic" android:layout_width="wrap_content"
+                  android:layout_height="wrap_content" android:textColor="@color/blue"
+                  android:textSize="15sp" android:layout_marginTop="6dp" android:gravity="center"/>
+              <TextView android:id="@+id/tvDate" android:layout_width="wrap_content"
+                  android:layout_height="wrap_content" android:textColor="@color/text_dim"
+                  android:textSize="13sp" android:layout_marginTop="4dp" android:gravity="center"/>
+              <TextView android:id="@+id/tvPages" android:layout_width="wrap_content"
+                  android:layout_height="wrap_content" android:textColor="@color/text_secondary"
+                  android:textSize="13sp" android:layout_marginTop="4dp" android:gravity="center"/>
+              <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                  android:text="The overlay floats over YouTube, Meet, or any app.\n\nTap Launch — then open your lecture app. The writing toolbar will appear on top."
+                  android:textColor="@color/text_secondary" android:textSize="14sp"
+                  android:gravity="center" android:lineSpacingMultiplier="1.5"
+                  android:layout_marginTop="24dp" android:layout_marginBottom="32dp"/>
+              <Button android:id="@+id/btnLaunchOverlay" android:layout_width="match_parent"
+                  android:layout_height="52dp" android:text="✏  Launch Overlay"
+                  android:textColor="#FFFFFF" android:textSize="16sp" android:textStyle="bold"
+                  android:backgroundTint="@color/blue" android:layout_marginBottom="12dp"/>
+              <Button android:id="@+id/btnBack" android:layout_width="match_parent"
+                  android:layout_height="48dp" android:text="← Back"
+                  android:textColor="@color/text_secondary" android:backgroundTint="@color/surface_high"/>
+          </LinearLayout>
+          LSESSION
+
+          # ── overlay_main.xml ──────────────────────────
+          cat > app/src/main/res/layout/overlay_main.xml << 'LOVERLAY'
+          <?xml version="1.0" encoding="utf-8"?>
+          <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent" android:layout_height="match_parent"
+              android:background="@android:color/transparent">
+              <com.overlaynote.app.DrawingView android:id="@+id/drawingView"
+                  android:layout_width="match_parent" android:layout_height="match_parent"
+                  android:background="@android:color/transparent"/>
+          </FrameLayout>
+          LOVERLAY
+
+          # ── overlay_toolbar.xml ───────────────────────
+          cat > app/src/main/res/layout/overlay_toolbar.xml << 'LTOOLBAR'
+          <?xml version="1.0" encoding="utf-8"?>
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="52dp" android:layout_height="wrap_content"
+              android:orientation="vertical" android:gravity="center_horizontal"
+              android:background="@drawable/toolbar_bg" android:paddingTop="8dp"
+              android:paddingBottom="10dp" android:paddingStart="6dp" android:paddingEnd="6dp"
+              android:elevation="16dp">
+              <View android:id="@+id/dragHandle" android:layout_width="28dp" android:layout_height="4dp"
+                  android:background="@color/border" android:layout_marginBottom="6dp"/>
+              <ImageButton android:id="@+id/btnPen" style="@style/ToolBtn"
+                  android:src="@android:drawable/ic_menu_edit" android:contentDescription="Pen"
+                  android:tint="@color/text_primary"/>
+              <ImageButton android:id="@+id/btnPencil" style="@style/ToolBtn"
+                  android:src="@android:drawable/ic_menu_edit" android:alpha="0.5"
+                  android:contentDescription="Pencil" android:tint="@color/text_primary"/>
+              <ImageButton android:id="@+id/btnHighlighter" style="@style/ToolBtn"
+                  android:src="@android:drawable/ic_menu_add" android:contentDescription="Highlighter"
+                  android:tint="@color/amber"/>
+              <ImageButton android:id="@+id/btnEraser" style="@style/ToolBtn"
+                  android:src="@android:drawable/ic_menu_close_clear_cancel"
+                  android:contentDescription="Eraser" android:tint="@color/text_primary"/>
+              <View android:layout_width="32dp" android:layout_height="1dp"
+                  android:background="@color/border" android:layout_marginTop="4dp" android:layout_marginBottom="4dp"/>
+              <View android:id="@+id/btnColor" android:layout_width="28dp" android:layout_height="28dp"
+                  android:background="@drawable/circle_white" android:layout_margin="4dp"
+                  android:clickable="true" android:focusable="true" android:contentDescription="Color"/>
+              <View android:id="@+id/btnSize" android:layout_width="16dp" android:layout_height="16dp"
+                  android:background="@drawable/circle_gray" android:layout_margin="4dp"
+                  android:clickable="true" android:focusable="true" android:contentDescription="Size"/>
+              <View android:layout_width="32dp" android:layout_height="1dp"
+                  android:background="@color/border" android:layout_marginTop="4dp" android:layout_marginBottom="4dp"/>
+              <ImageButton android:id="@+id/btnUndo" style="@style/ToolBtn"
+                  android:src="@android:drawable/ic_menu_revert" android:contentDescription="Undo"
+                  android:tint="@color/text_primary"/>
+              <ImageButton android:id="@+id/btnRedo" style="@style/ToolBtn"
+                  android:src="@android:drawable/ic_menu_send" android:contentDescription="Redo"
+                  android:tint="@color/text_primary"/>
+              <ImageButton android:id="@+id/btnClear" style="@style/ToolBtn"
+                  android:src="@android:drawable/ic_menu_delete" android:tint="@color/red"
+                  android:contentDescription="Clear"/>
+              <View android:layout_width="32dp" android:layout_height="1dp"
+                  android:background="@color/border" android:layout_marginTop="4dp" android:layout_marginBottom="4dp"/>
+              <ImageButton android:id="@+id/btnMode" style="@style/ToolBtn"
+                  android:src="@android:drawable/ic_menu_view" android:contentDescription="Mode"
+                  android:tint="@color/teal"/>
+              <ImageButton android:id="@+id/btnPrevPage" style="@style/ToolBtn"
+                  android:src="@android:drawable/ic_media_previous" android:contentDescription="Prev"
+                  android:tint="@color/text_primary"/>
+              <TextView android:id="@+id/tvPageIndicator" android:layout_width="wrap_content"
+                  android:layout_height="wrap_content" android:text="1/1"
+                  android:textColor="@color/text_secondary" android:textSize="10sp" android:gravity="center"/>
+              <ImageButton android:id="@+id/btnNextPage" style="@style/ToolBtn"
+                  android:src="@android:drawable/ic_media_next" android:contentDescription="Next"
+                  android:tint="@color/text_primary"/>
+              <ImageButton android:id="@+id/btnNewPage" style="@style/ToolBtn"
+                  android:src="@android:drawable/ic_input_add" android:tint="@color/teal"
+                  android:contentDescription="New page"/>
+              <View android:layout_width="32dp" android:layout_height="1dp"
+                  android:background="@color/border" android:layout_marginTop="4dp" android:layout_marginBottom="4dp"/>
+              <ImageButton android:id="@+id/btnSave" style="@style/ToolBtn"
+                  android:src="@android:drawable/ic_menu_save" android:tint="@color/amber"
+                  android:contentDescription="Save"/>
+              <ImageButton android:id="@+id/btnClose" style="@style/ToolBtn"
+                  android:src="@android:drawable/ic_menu_close_clear_cancel"
+                  android:tint="@color/text_dim" android:contentDescription="Close"/>
+          </LinearLayout>
+          LTOOLBAR
+
+          # ── Kotlin source files ───────────────────────
+          cat > app/src/main/java/com/overlaynote/app/DrawingView.kt << 'DRAWINGVIEW'
+          package com.overlaynote.app
+          import android.content.Context; import android.graphics.*; import android.util.AttributeSet; import android.view.MotionEvent; import android.view.View
+          enum class DrawingTool { PEN, PENCIL, HIGHLIGHTER, ERASER }
+          class DrawingView @JvmOverloads constructor(context: Context, attrs: AttributeSet? = null) : View(context, attrs) {
+              private val paint = Paint().apply { isAntiAlias=true; isDither=true; style=Paint.Style.STROKE; strokeJoin=Paint.Join.ROUND; strokeCap=Paint.Cap.ROUND }
+              private val eraserPaint = Paint().apply { isAntiAlias=true; style=Paint.Style.STROKE; strokeJoin=Paint.Join.ROUND; strokeCap=Paint.Cap.ROUND; xfermode=PorterDuffXfermode(PorterDuff.Mode.CLEAR) }
+              var tool:DrawingTool=DrawingTool.PEN; var drawColor:Int=Color.WHITE; var strokeWidth:Float=8f
+              private var drawBitmap:Bitmap?=null; private var drawCanvas:Canvas?=null; private val path=Path(); private var lastX=0f; private var lastY=0f
+              private val undoStack=ArrayDeque<Bitmap>(); private val redoStack=ArrayDeque<Bitmap>()
+              override fun onSizeChanged(w:Int,h:Int,oldw:Int,oldh:Int) { super.onSizeChanged(w,h,oldw,oldh); val prev=drawBitmap; drawBitmap=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888); drawCanvas=Canvas(drawBitmap!!); if(prev!=null&&!prev.isRecycled) { drawCanvas!!.drawBitmap(prev,0f,0f,null); prev.recycle() } }
+              override fun onDraw(c:Canvas) { super.onDraw(c); drawBitmap?.let{c.drawBitmap(it,0f,0f,null)}; if(tool!=DrawingTool.ERASER) c.drawPath(path,configurePaint()) }
+              override fun onTouchEvent(e:MotionEvent):Boolean { val x=e.x; val y=e.y
+                  when(e.action) { MotionEvent.ACTION_DOWN -> { saveSnapshot(); path.reset(); path.moveTo(x,y); lastX=x; lastY=y }
+                      MotionEvent.ACTION_MOVE -> { val mx=(lastX+x)/2f; val my=(lastY+y)/2f; path.quadTo(lastX,lastY,mx,my); lastX=x; lastY=y
+                          if(tool==DrawingTool.ERASER){eraserPaint.strokeWidth=strokeWidth*3f; drawCanvas?.drawPath(path,eraserPaint); path.reset(); path.moveTo(x,y)} }
+                      MotionEvent.ACTION_UP -> { path.lineTo(x,y); if(tool!=DrawingTool.ERASER) drawCanvas?.drawPath(path,configurePaint()); path.reset() } }
+                  invalidate(); return true }
+              private fun configurePaint():Paint = paint.apply { when(tool) {
+                  DrawingTool.PEN -> { color=drawColor; strokeWidth=this@DrawingView.strokeWidth; alpha=255; maskFilter=null; xfermode=null }
+                  DrawingTool.PENCIL -> { color=drawColor; strokeWidth=this@DrawingView.strokeWidth*0.7f; alpha=130; maskFilter=BlurMaskFilter(1.5f,BlurMaskFilter.Blur.NORMAL); xfermode=null }
+                  DrawingTool.HIGHLIGHTER -> { color=drawColor; strokeWidth=this@DrawingView.strokeWidth*5f; alpha=80; maskFilter=null; xfermode=null }
+                  DrawingTool.ERASER -> {} } }
+              private fun saveSnapshot() { drawBitmap?.let { val s=it.copy(Bitmap.Config.ARGB_8888,false); undoStack.addLast(s); if(undoStack.size>30) undoStack.removeFirst().recycle(); redoStack.forEach{b->b.recycle()}; redoStack.clear() } }
+              fun undo() { if(undoStack.isEmpty()) return; val cur=drawBitmap?.copy(Bitmap.Config.ARGB_8888,false); cur?.let{redoStack.addLast(it)}; val prev=undoStack.removeLast(); drawCanvas?.drawColor(Color.TRANSPARENT,PorterDuff.Mode.CLEAR); drawCanvas?.drawBitmap(prev,0f,0f,null); prev.recycle(); invalidate() }
+              fun redo() { if(redoStack.isEmpty()) return; val cur=drawBitmap?.copy(Bitmap.Config.ARGB_8888,false); cur?.let{undoStack.addLast(it)}; val next=redoStack.removeLast(); drawCanvas?.drawColor(Color.TRANSPARENT,PorterDuff.Mode.CLEAR); drawCanvas?.drawBitmap(next,0f,0f,null); next.recycle(); invalidate() }
+              fun clearCanvas() { saveSnapshot(); drawCanvas?.drawColor(Color.TRANSPARENT,PorterDuff.Mode.CLEAR); invalidate() }
+              fun getBitmap():Bitmap?=drawBitmap?.copy(Bitmap.Config.ARGB_8888,false)
+              fun loadBitmap(bmp:Bitmap?) { if(bmp==null) return; drawCanvas?.drawColor(Color.TRANSPARENT,PorterDuff.Mode.CLEAR); drawCanvas?.drawBitmap(bmp,0f,0f,null); invalidate() }
+          }
+          DRAWINGVIEW
+
+          cat > app/src/main/java/com/overlaynote/app/Session.kt << 'SESSION'
+          package com.overlaynote.app
+          data class Session(val id:String, val subject:String, val topic:String, val date:String, val created:String, val pages:MutableList<String>)
+          SESSION
+
+          cat > app/src/main/java/com/overlaynote/app/SessionManager.kt << 'SESSIONMGR'
+          package com.overlaynote.app
+          import android.content.Context; import android.graphics.Bitmap; import android.graphics.BitmapFactory
+          import org.json.JSONArray; import org.json.JSONObject
+          import java.io.File; import java.io.FileOutputStream; import java.util.UUID
+          object SessionManager {
+              private const val PREF="overlaynote_sessions"; private const val KEY="session_list"
+              fun getSessions(ctx:Context):List<Session> { val p=ctx.getSharedPreferences(PREF,Context.MODE_PRIVATE); val j=p.getString(KEY,"[]")?:"[]"; return parse(j).sortedByDescending{it.created} }
+              fun getSession(ctx:Context,id:String):Session?=getSessions(ctx).find{it.id==id}
+              fun saveSession(ctx:Context,s:Session) { val l=getSessions(ctx).toMutableList(); val i=l.indexOfFirst{it.id==s.id}; if(i>=0) l[i]=s else l.add(0,s); persist(ctx,l) }
+              fun deleteSession(ctx:Context,id:String) { persist(ctx,getSessions(ctx).filter{it.id!=id}); pageDir(ctx,id).deleteRecursively() }
+              private fun persist(ctx:Context,l:List<Session>) { val a=JSONArray(); l.forEach{a.put(toJson(it))}; ctx.getSharedPreferences(PREF,Context.MODE_PRIVATE).edit().putString(KEY,a.toString()).apply() }
+              fun savePages(ctx:Context,sid:String,pages:List<Bitmap?>) { val s=getSession(ctx,sid)?:return; val dir=pageDir(ctx,sid); dir.mkdirs(); val ids=mutableListOf<String>(); pages.forEachIndexed{i,bmp->val pid=if(i<s.pages.size)s.pages[i] else "page_${System.currentTimeMillis()}_$i"; ids.add(pid); bmp?.let{saveBmp(dir,pid,it)}}; saveSession(ctx,s.copy(pages=ids.toMutableList())) }
+              fun loadPageBitmap(ctx:Context,sid:String,pid:String):Bitmap? { val f=File(pageDir(ctx,sid),"$pid.png"); return if(f.exists()) BitmapFactory.decodeFile(f.absolutePath) else null }
+              private fun saveBmp(dir:File,pid:String,bmp:Bitmap) { FileOutputStream(File(dir,"$pid.png")).use{bmp.compress(Bitmap.CompressFormat.PNG,100,it)} }
+              private fun pageDir(ctx:Context,sid:String)=File(ctx.filesDir,"sessions/$sid")
+              private fun toJson(s:Session)=JSONObject().apply{put("id",s.id);put("subject",s.subject);put("topic",s.topic);put("date",s.date);put("created",s.created);put("pages",JSONArray(s.pages))}
+              private fun parse(j:String):List<Session> { val a=JSONArray(j); return (0 until a.length()).map{val o=a.getJSONObject(it); val p=mutableListOf<String>(); val pa=o.optJSONArray("pages"); if(pa!=null) for(i in 0 until pa.length()) p.add(pa.getString(i)); Session(o.getString("id"),o.getString("subject"),o.getString("topic"),o.getString("date"),o.getString("created"),p) } }
+          }
+          SESSIONMGR
+
+          cat > app/src/main/java/com/overlaynote/app/ExportHelper.kt << 'EXPHELPER'
+          package com.overlaynote.app
+          import android.content.ContentValues; import android.content.Context; import android.graphics.Bitmap
+          import android.os.Build; import android.os.Environment; import android.provider.MediaStore
+          import java.io.File; import java.io.FileOutputStream
+          object ExportHelper {
+              fun savePng(ctx:Context,bmp:Bitmap,sid:String,page:Int) {
+                  val fn="OverlayNote_${sid.take(6)}_page${page+1}_${System.currentTimeMillis()}.png"
+                  if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.Q) {
+                      val v=ContentValues().apply{put(MediaStore.Images.Media.DISPLAY_NAME,fn);put(MediaStore.Images.Media.MIME_TYPE,"image/png");put(MediaStore.Images.Media.RELATIVE_PATH,"${Environment.DIRECTORY_PICTURES}/OverlayNote");put(MediaStore.Images.Media.IS_PENDING,1)}
+                      val uri=ctx.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,v)
+                      uri?.let{ctx.contentResolver.openOutputStream(it)?.use{o->bmp.compress(Bitmap.CompressFormat.PNG,100,o)};v.clear();v.put(MediaStore.Images.Media.IS_PENDING,0);ctx.contentResolver.update(it,v,null,null)}
+                  } else { val dir=File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),"OverlayNote"); dir.mkdirs(); FileOutputStream(File(dir,fn)).use{bmp.compress(Bitmap.CompressFormat.PNG,100,it)} }
+              }
+          }
+          EXPHELPER
+
+          cat > app/src/main/java/com/overlaynote/app/MainActivity.kt << 'MAINACT'
+          package com.overlaynote.app
+          import android.content.Intent; import android.net.Uri; android.os.Bundle; import android.provider.Settings
+          import android.view.*; import android.widget.*; import androidx.appcompat.app.AlertDialog; import androidx.appcompat.app.AppCompatActivity
+          import androidx.recyclerview.widget.LinearLayoutManager; import androidx.recyclerview.widget.RecyclerView
+          import com.google.android.material.floatingactionbutton.FloatingActionButton
+          import java.text.SimpleDateFormat; import java.util.*
+          class MainActivity:AppCompatActivity() {
+              private lateinit var rv:RecyclerView; private lateinit var empty:LinearLayout; private lateinit var fab:FloatingActionButton; private lateinit var adapter:SessionAdapter
+              override fun onCreate(s:Bundle?) { super.onCreate(s); setContentView(R.layout.activity_main)
+                  rv=findViewById(R.id.recyclerSessions); empty=findViewById(R.id.emptyView); fab=findViewById(R.id.fab)
+                  rv.layoutManager=LinearLayoutManager(this); adapter=SessionAdapter({openSession(it)},{deleteSession(it)}); rv.adapter=adapter
+                  fab.setOnClickListener{showNewSessionDialog()}; OverlayService.stop(this) }
+              override fun onResume() { super.onResume(); refresh() }
+              private fun refresh() { val l=SessionManager.getSessions(this); adapter.submitList(l); empty.visibility=if(l.isEmpty()) View.VISIBLE else View.GONE; rv.visibility=if(l.isEmpty()) View.GONE else View.VISIBLE }
+              private fun showNewSessionDialog() { val v=layoutInflater.inflate(R.layout.dialog_new_session,null); val es=v.findViewById<EditText>(R.id.etSubject); val et=v.findViewById<EditText>(R.id.etTopic)
+                  AlertDialog.Builder(this).setTitle("New Lecture Session").setView(v).setPositiveButton("Start Writing"){_,_->val sub=es.text.toString().trim(); if(sub.isEmpty()){Toast.makeText(this,"Enter subject",Toast.LENGTH_SHORT).show();return@setPositiveButton}
+                      val sess=Session(UUID.randomUUID().toString(),sub,et.text.toString().trim().ifEmpty{"General Notes"},SimpleDateFormat("EEE, MMM d",Locale.getDefault()).format(Date()),SimpleDateFormat("h:mm a",Locale.getDefault()).format(Date()),mutableListOf())
+                      SessionManager.saveSession(this,sess); openSession(sess)}.setNegativeButton("Cancel",null).show() }
+              private fun openSession(s:Session) { if(!Settings.canDrawOverlays(this)){AlertDialog.Builder(this).setTitle("Permission Required").setMessage("Enable 'Display over other apps' for OverlayNote in Settings.").setPositiveButton("Open Settings"){_,_->startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,Uri.parse("package:$packageName")))}.setNegativeButton("Cancel",null).show();return}
+                  startActivity(Intent(this,SessionActivity::class.java).putExtra("session_id",s.id)) }
+              private fun deleteSession(s:Session) { AlertDialog.Builder(this).setTitle("Delete").setMessage("Delete \"${s.subject}\"?").setPositiveButton("Delete"){_,_->SessionManager.deleteSession(this,s.id);refresh()}.setNegativeButton("Cancel",null).show() }
+          }
+          class SessionAdapter(private val onOpen:(Session)->Unit, private val onDelete:(Session)->Unit):RecyclerView.Adapter<SessionAdapter.VH>() {
+              private var list=listOf<Session>(); fun submitList(l:List<Session>){list=l;notifyDataSetChanged()}
+              inner class VH(v:View):RecyclerView.ViewHolder(v){val tvS=v.findViewById<TextView>(R.id.tvSubject);val tvT=v.findViewById<TextView>(R.id.tvTopic);val tvD=v.findViewById<TextView>(R.id.tvDate);val tvP=v.findViewById<TextView>(R.id.tvPages);val del=v.findViewById<ImageButton>(R.id.btnDelete);val card=v.findViewById<androidx.cardview.widget.CardView>(R.id.card)}
+              override fun onCreateViewHolder(p:ViewGroup,t:Int)=VH(LayoutInflater.from(p.context).inflate(R.layout.item_session,p,false))
+              override fun onBindViewHolder(h:VH,i:Int){val s=list[i];h.tvS.text=s.subject;h.tvT.text=s.topic;h.tvD.text=s.date;h.tvP.text="${s.pages.size} page(s)";h.card.setOnClickListener{onOpen(s)};h.del.setOnClickListener{onDelete(s)}}
+              override fun getItemCount()=list.size
+          }
+          MAINACT
+
+          cat > app/src/main/java/com/overlaynote/app/SessionActivity.kt << 'SESSACT'
+          package com.overlaynote.app
+          import android.content.Intent; import android.os.Bundle; import android.widget.*; import androidx.appcompat.app.AppCompatActivity
+          class SessionActivity:AppCompatActivity() {
+              override fun onCreate(s:Bundle?) { super.onCreate(s); setContentView(R.layout.activity_session)
+                  val sid=intent.getStringExtra("session_id")?:run{finish();return}
+                  val sess=SessionManager.getSession(this,sid)?:run{finish();return}
+                  findViewById<TextView>(R.id.tvSubject).text=sess.subject; findViewById<TextView>(R.id.tvTopic).text=sess.topic
+                  findViewById<TextView>(R.id.tvDate).text="${sess.date} · ${sess.created}"; findViewById<TextView>(R.id.tvPages).text="${sess.pages.size} page(s)"
+                  findViewById<Button>(R.id.btnLaunchOverlay).setOnClickListener{OverlayService.start(this,sid);Toast.makeText(this,"Overlay started! Open YouTube now.",Toast.LENGTH_LONG).show();startActivity(Intent(Intent.ACTION_MAIN).apply{addCategory(Intent.CATEGORY_HOME);flags=Intent.FLAG_ACTIVITY_NEW_TASK})}
+                  findViewById<Button>(R.id.btnBack).setOnClickListener{finish()} }
+          }
+          SESSACT
+
+          cat > app/src/main/java/com/overlaynote/app/OverlayService.kt << 'OVERLAYSVC'
+          package com.overlaynote.app
+          import android.app.*; import android.content.*; import android.graphics.*; import android.os.*; import android.view.*; import android.widget.*
+          import androidx.core.app.NotificationCompat; import android.graphics.PixelFormat
+          class OverlayService:Service() {
+              companion object { const val ACTION_STOP="com.overlaynote.STOP"; const val EXTRA_SID="session_id"; const val CH="overlay_ch"; const val NID=1
+                  fun start(ctx:Context,sid:String){val i=Intent(ctx,OverlayService::class.java).putExtra(EXTRA_SID,sid); if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.O) ctx.startForegroundService(i) else ctx.startService(i)}
+                  fun stop(ctx:Context){ctx.stopService(Intent(ctx,OverlayService::class.java))} }
+              private lateinit var wm:WindowManager; private lateinit var overlay:View; private lateinit var dv:DrawingView; private lateinit var tb:View
+              private var sid=""; private var page=0; private var pages=mutableListOf<Bitmap?>(); private var drawMode=true
+              private val colors=listOf(Color.WHITE,Color.parseColor("#4A8FE7"),Color.parseColor("#2ECFB0"),Color.parseColor("#F5A623"),Color.parseColor("#E05C5C")); private var ci=0
+              private val sizes=listOf(4f,8f,14f,22f,36f); private var si=1
+              private var tbInitX=0f;private var tbInitY=0f;private var tbTX=0f;private var tbTY=0f
+              override fun onBind(i:Intent?)=null
+              override fun onCreate(){super.onCreate();createCh();wm=getSystemService(WINDOW_SERVICE) as WindowManager}
+              override fun onStartCommand(i:Intent?,f:Int,id:Int):Int{if(i?.action==ACTION_STOP){stopSelf();return START_NOT_STICKY};sid=i?.getStringExtra(EXTRA_SID)?:"";val s=SessionManager.getSession(this,sid);pages=MutableList(maxOf(1,s?.pages?.size?:1)){null};s?.pages?.forEachIndexed{idx,pid->pages[idx]=SessionManager.loadPageBitmap(this,sid,pid)};startForeground(NID,buildNotif());buildUI();return START_STICKY}
+              private fun buildUI(){val inf=LayoutInflater.from(this);overlay=inf.inflate(R.layout.overlay_main,null);dv=overlay.findViewById(R.id.drawingView)
+                  val op=WindowManager.LayoutParams(WindowManager.LayoutParams.MATCH_PARENT,WindowManager.LayoutParams.MATCH_PARENT,if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,PixelFormat.TRANSLUCENT)
+                  wm.addView(overlay,op);dv.post{pages[page]?.let{dv.loadBitmap(it)}}
+                  tb=inf.inflate(R.layout.overlay_toolbar,null)
+                  val tp=WindowManager.LayoutParams(WindowManager.LayoutParams.WRAP_CONTENT,WindowManager.LayoutParams.WRAP_CONTENT,if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,PixelFormat.TRANSLUCENT)
+                  tp.gravity=Gravity.TOP or Gravity.START;tp.x=24;tp.y=200;wm.addView(tb,tp);bindTb(tp)}
+              private fun bindTb(tp:WindowManager.LayoutParams){
+                  tb.findViewById<View>(R.id.dragHandle).setOnTouchListener{_,e->when(e.action){MotionEvent.ACTION_DOWN->{tbInitX=tp.x.toFloat();tbInitY=tp.y.toFloat();tbTX=e.rawX;tbTY=e.rawY};MotionEvent.ACTION_MOVE->{tp.x=(tbInitX+e.rawX-tbTX).toInt();tp.y=(tbInitY+e.rawY-tbTY).toInt();wm.updateViewLayout(tb,tp)}};true}
+                  tb.findViewById<ImageButton>(R.id.btnPen).setOnClickListener{dv.tool=DrawingTool.PEN;upTb()}
+                  tb.findViewById<ImageButton>(R.id.btnPencil).setOnClickListener{dv.tool=DrawingTool.PENCIL;upTb()}
+                  tb.findViewById<ImageButton>(R.id.btnHighlighter).setOnClickListener{dv.tool=DrawingTool.HIGHLIGHTER;upTb()}
+                  tb.findViewById<ImageButton>(R.id.btnEraser).setOnClickListener{dv.tool=DrawingTool.ERASER;upTb()}
+                  tb.findViewById<View>(R.id.btnColor).setOnClickListener{ci=(ci+1)%colors.size;dv.drawColor=colors[ci];upTb()}
+                  tb.findViewById<View>(R.id.btnSize).setOnClickListener{si=(si+1)%sizes.size;dv.strokeWidth=sizes[si];upTb()}
+                  tb.findViewById<ImageButton>(R.id.btnUndo).setOnClickListener{dv.undo()}
+                  tb.findViewById<ImageButton>(R.id.btnRedo).setOnClickListener{dv.redo()}
+                  tb.findViewById<ImageButton>(R.id.btnClear).setOnClickListener{dv.clearCanvas()}
+                  tb.findViewById<ImageButton>(R.id.btnMode).setOnClickListener{drawMode=!drawMode;val lp=overlay.layoutParams as WindowManager.LayoutParams;lp.flags=if(drawMode) WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN else WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN;wm.updateViewLayout(overlay,lp);Toast.makeText(this,if(drawMode)"Draw mode" else "View mode",Toast.LENGTH_SHORT).show()}
+                  tb.findViewById<ImageButton>(R.id.btnPrevPage).setOnClickListener{if(page>0){save();page--;dv.post{dv.clearCanvas();pages[page]?.let{dv.loadBitmap(it)}};upPage()}}
+                  tb.findViewById<ImageButton>(R.id.btnNextPage).setOnClickListener{if(page<pages.size-1){save();page++;dv.post{dv.clearCanvas();pages[page]?.let{dv.loadBitmap(it)}};upPage()}}
+                  tb.findViewById<ImageButton>(R.id.btnNewPage).setOnClickListener{save();pages.add(null);page=pages.size-1;dv.clearCanvas();upPage();Toast.makeText(this,"Page ${page+1}",Toast.LENGTH_SHORT).show()}
+                  tb.findViewById<ImageButton>(R.id.btnSave).setOnClickListener{save();dv.getBitmap()?.let{ExportHelper.savePng(this,it,sid,page);Toast.makeText(this,"Saved to Gallery ✓",Toast.LENGTH_SHORT).show()}}
+                  tb.findViewById<ImageButton>(R.id.btnClose).setOnClickListener{saveAll();stopSelf();startActivity(Intent(Intent.ACTION_MAIN).apply{addCategory(Intent.CATEGORY_HOME);flags=Intent.FLAG_ACTIVITY_NEW_TASK})}
+                  upTb();upPage()}
+              private fun save(){pages[page]=dv.getBitmap()}
+              private fun saveAll(){save();SessionManager.savePages(this,sid,pages)}
+              private fun upTb(){val cd=tb.findViewById<View>(R.id.btnColor);cd.setBackgroundColor(colors[ci])}
+              private fun upPage(){tb.findViewById<TextView>(R.id.tvPageIndicator)?.text="${page+1}/${pages.size}"}
+              private fun buildNotif():Notification{val si2=PendingIntent.getService(this,0,Intent(this,OverlayService::class.java).apply{action=ACTION_STOP},PendingIntent.FLAG_IMMUTABLE);return NotificationCompat.Builder(this,CH).setContentTitle("OverlayNote Active").setContentText("Writing overlay is on").setSmallIcon(android.R.drawable.ic_menu_edit).addAction(android.R.drawable.ic_menu_close_clear_cancel,"Stop",si2).setOngoing(true).build()}
+              private fun createCh(){if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.O){val ch=NotificationChannel(CH,"OverlayNote",NotificationManager.IMPORTANCE_LOW).apply{description="Overlay service"};getSystemService(NotificationManager::class.java)?.createNotificationChannel(ch)}}
+              override fun onDestroy(){super.onDestroy();saveAll();runCatching{wm.removeView(overlay)};runCatching{wm.removeView(tb)}}
+          }
+          OVERLAYSVC
+
+      - name: Build APK with Gradle
         run: |
-          cd $PROJECT_DIR
-          ./gradlew assembleDebug
+          cd $GITHUB_WORKSPACE
+          gradle assembleDebug --no-daemon
+        env:
+          ANDROID_HOME: /usr/local/lib/android/sdk
+
+      - name: Find APK
+        run: find . -name "*.apk"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: OverlayNote-APK
-          path: "**/app/build/outputs/apk/debug/app-debug.apk"
-          retention-days: 30
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: OverlayNote-APK
-          path: "**/app/build/outputs/apk/debug/app-debug.apk"
+          path: "**/app-debug.apk"
           retention-days: 30
